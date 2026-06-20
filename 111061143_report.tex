@@ -1,0 +1,203 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{array}
+\usepackage{booktabs}
+
+\title{MiniChess Project Report}
+\author{Student ID: 111061143}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Overview}
+
+This project implements a MiniChess state evaluator, legal move generation, and
+a stronger benchmark policy. The main submitted files are
+\texttt{111061143\_state.cpp}, \texttt{111061143\_state.hpp},
+\texttt{111061143\_submission.cpp}, and \texttt{111061143\_submission.hpp}.
+Additional integration files were also modified so the engine can register and
+use the stronger search policy through UBGI.
+
+\section{Modified Files}
+
+\begin{center}
+\begin{tabular}{>{\ttfamily}p{0.42\linewidth}p{0.48\linewidth}}
+\toprule
+File & Purpose \\
+\midrule
+src/games/minichess/111061143\_state.cpp &
+Implements board evaluation and completes MiniChess legal move generation. \\
+src/games/minichess/111061143\_state.hpp &
+State interface used by the submitted implementation. \\
+src/policy/111061143\_submission.cpp &
+Implements MiniMax, Alpha-Beta, Principal Variation Search, move ordering,
+quiescence search, and transposition table support. \\
+src/policy/111061143\_submission.hpp &
+Declares the search policies and search parameters. \\
+src/policy/111061143\_registry.hpp &
+Registers the available policies and changes the default policy to PVS. \\
+src/ubgi/111061143\_ubgi.cpp &
+Connects the submitted registry to the UBGI engine and adds a small White
+opening book. \\
+src/ubgi/111061143\_ubgi.hpp &
+Includes the submitted state header. \\
+Makefile &
+Removes \texttt{-march=native} to improve compilation portability. \\
+cli/cli.py &
+Adds \texttt{alphabeta} and \texttt{pvs} to the command-line algorithm choices
+and changes the default White/Black algorithm from \texttt{minimax} to
+\texttt{pvs}. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{State Implementation}
+
+The state implementation completes the missing MiniChess logic in the original
+starter code. In this project, a winning state means that a legal move can
+capture the opponent king. Once this happens, the game is already decided, so
+the evaluator returns the maximum score immediately instead of letting the
+opponent move the king away on a later turn.
+For non-terminal positions, the evaluator supports two modes:
+
+\begin{itemize}[leftmargin=*]
+    \item A simple material evaluator using piece values.
+    \item A stronger evaluator using material, piece-square tables, king
+    tropism, and mobility.
+\end{itemize}
+
+The stronger evaluator first locates both kings, then evaluates every piece from
+the current player's perspective. Material counts the value of pieces on the
+board. Piece-square tables give extra score for pieces on useful squares.
+King tropism gives a smaller positional bonus when pieces are closer to the
+opponent king; an immediate king capture is handled separately as a winning
+state. Mobility is calculated by generating legal moves for both sides and
+adding a bonus when the current player has more available moves.
+
+The legal move generator was also completed for knights. The knight move table
+contains the eight standard L-shaped moves, such as two squares in one
+direction and one square sideways. For each candidate square, the code checks
+whether the square is inside the board and whether it is already occupied by a
+friendly piece. Legal empty-square moves and captures are added to the move
+list. If one of those captures takes the opponent king, the state is marked as
+a win and move generation returns immediately because the game is over.
+
+\section{Search Policy}
+
+The submitted policy keeps the original MiniMax interface but extends it with
+stronger search algorithms. The engine still plays only one move in the current
+turn, but it searches several future plies first. For example, depth 1 checks
+the engine's next move, depth 2 also checks the opponent reply, and depth 3
+checks the engine's next response after that. This lookahead helps avoid moves
+that look good immediately but lose material or the king on the following turn.
+
+\subsection{MiniMax}
+
+The basic MiniMax implementation recursively evaluates child states to the
+requested depth. Scores are converted back into the current player's
+perspective after each child search. Terminal wins are scored as
+\texttt{P\_MAX - ply}, which prefers faster wins. Draws and repeated positions
+use a draw contempt parameter, making the engine slightly prefer continuing play
+over accepting neutral repetition.
+
+\subsection{Alpha-Beta Search}
+
+Alpha-Beta pruning was added to reduce the number of explored nodes while
+preserving the same final minimax value. Alpha is the best score the current
+side has already found. Beta is the opponent's limit: if a branch becomes good
+enough for one player that the other player would avoid allowing it, the engine
+does not need to continue searching that branch. This pruning lets the engine
+search deeper than plain MiniMax in the same amount of time.
+
+\subsection{Principal Variation Search}
+
+Principal Variation Search (PVS) is used as the default algorithm. PVS is an
+optimized form of Alpha-Beta. It searches the first, best-looking move normally.
+For later moves, it first performs a cheaper narrow-window search that only asks
+whether the move can beat the current best score. If the answer is no, the move
+is skipped quickly. If the answer is yes, the move is searched again with a full
+window to get a more accurate score. This works well when move ordering puts a
+strong move first.
+
+\subsection{Move Ordering}
+
+Moves are sorted before search. The ordering gives priority to:
+
+\begin{itemize}[leftmargin=*]
+    \item The best move from the transposition table.
+    \item Captures, using a captured-piece-value minus moving-piece-value
+    heuristic.
+    \item Pawn promotions.
+    \item Moves toward the center.
+\end{itemize}
+
+Good move ordering improves both Alpha-Beta and PVS because stronger moves are
+searched earlier. Once a strong score is found, weaker branches can often be
+cut off sooner, which saves time and allows deeper search.
+
+\subsection{Transposition Table}
+
+A thread-local transposition table stores previously searched positions by
+state hash. This is useful because different move orders can sometimes reach
+the same board position. Each entry records how deeply the position was
+searched, the score, the type of score, and the best move found. An exact score
+means the stored value is the searched value. A lower bound means the real score
+is at least that good, and an upper bound means the real score is at most that
+good. Cached results are only reused when the old search depth is at least as
+deep as the current request, because a shallow result may miss future tactics.
+The stored best move is also tried first next time, improving move ordering.
+
+\subsection{Quiescence Search}
+
+At depth zero, the search does not stop immediately on all positions. If the
+position still has important tactical moves, the engine continues through noisy
+moves such as captures and promotions. This reduces the horizon effect. For
+example, if the engine stops while its queen can be captured immediately, it may
+evaluate the position too optimistically. Quiescence search looks at the
+immediate capture first, then evaluates a quieter and more stable position.
+
+\section{UBGI Integration}
+
+The registry adds three searchable policies: \texttt{minimax},
+\texttt{alphabeta}, and \texttt{pvs}. The default algorithm is changed to
+\texttt{pvs}, so benchmark runs use the strongest submitted search by default.
+
+The UBGI file also includes a small exact-position book for White. It starts
+from the opening position and may continue for many moves only if the board
+keeps matching the stored line. The book is keyed by encoded board state and
+side to move, so it is only used when the current position exactly matches a
+stored position. If the opponent makes a different move, the position no longer
+matches the book and the engine automatically falls back to normal PVS search.
+
+\section{Parameters}
+
+The submitted policy supports the following options:
+
+\begin{center}
+\begin{tabular}{>{\ttfamily}p{0.28\linewidth}p{0.16\linewidth}p{0.45\linewidth}}
+\toprule
+Parameter & Default & Description \\
+\midrule
+UseKPEval & true & Enables material, piece-square table, and king-tropism evaluation. \\
+UseEvalMobility & true & Adds the legal-move mobility bonus. \\
+ReportPartial & true & Reports root move updates during search. \\
+DrawContempt & 20 & Penalizes draw and neutral repetition scores slightly. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Conclusion}
+
+The final engine improves the starter MiniChess implementation in two main
+ways. First, the game state is complete enough to evaluate positions and
+generate knight moves correctly. Second, the submitted benchmark policy replaces
+plain MiniMax with PVS, Alpha-Beta pruning, move ordering, transposition table
+caching, and quiescence search. These changes increase search strength while
+keeping the original project interfaces compatible with the provided benchmark
+and UBGI framework.
+
+\end{document}

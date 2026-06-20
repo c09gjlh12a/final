@@ -2,8 +2,8 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include "state.hpp"
-#include "minimax.hpp"
+#include "111061143_state.hpp"
+#include "111061143_submission.hpp"
 
 namespace {
 

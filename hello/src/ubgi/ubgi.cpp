@@ -8,7 +8,6 @@
 #include <chrono>
 #include <algorithm>
 #include <cstdlib>
-#include <unordered_map>
 
 #include "ubgi.hpp"
 #include "config.hpp"
@@ -181,108 +180,6 @@ Move str_to_move(const std::string& s){
 }
 
 
-/* === Small MiniChess book ===
- *
- * This follows a local boss-vs-boss drawing line for White. It is intentionally
- * keyed by exact board+side, so normal search takes over as soon as the
- * opponent deviates.
- */
-static std::string book_key(const State& state){
-    return state.encode_board() + " " + std::to_string(state.player);
-}
-
-static const std::unordered_map<std::string, std::string>& white_book(){
-    static const std::unordered_map<std::string, std::string> book = [](){
-        std::unordered_map<std::string, std::string> b;
-        std::vector<std::string> line = {
-            "b2b3", "c5c4",
-            "c2c3", "b6c5",
-            "d2d3", "b5b4",
-            "c3b4", "c5d4",
-            "d3c4", "d5c4",
-            "b3c4", "d4d1",
-            "e1d1", "d6c4",
-            "a2a3", "a5b4",
-            "a3b4", "a6b5",
-            "b1a3", "b5b4",
-            "a3c4", "b4c4",
-            "a1a6", "c6d5",
-            "a6a5", "e6b6",
-            "d1c2", "b6b5",
-            "a5a4", "b5b4",
-            "a4a5", "b4b5",
-            "a5a4", "b5b4",
-            "a4a5", "b4b5",
-            "a5b5", "c4b5",
-            "c1b2", "d5c4",
-            "b2e5", "c4e2",
-            "e5d4", "e2c4",
-            "c2c3", "c4d5",
-            "c3d3", "d5b3",
-            "d3d2", "b5c4",
-            "d4e5", "c4c5",
-            "e5c3", "c5c4",
-            "c3b2", "c4b5",
-            "b2e5", "b5c5",
-            "e5c3", "c5c4",
-            "c3b2", "c4b5",
-            "b2d4", "b5b4",
-            "d4b6", "b4b5",
-            "b6d4", "b5c6",
-            "d2c3", "b3d5",
-            "c3b4", "d5a2",
-            "b4a3", "c6d5",
-            "a3a2", "d5d4",
-            "a2b2", "d4c5",
-            "b2c2", "c5b5",
-            "c2c3", "b5a6",
-            "c3b2", "a6b5",
-            "b2c2", "b5a6",
-            "c2b2", "a6b5",
-            "b2c2", "b5a6",
-            "c2d2", "a6b5",
-            "d2c3", "b5a6",
-            "c3d2", "a6b5",
-            "d2c3", "b5a6",
-            "c3b4", "a6b6",
-        };
-
-        State cur;
-        cur.get_legal_actions();
-        for(const std::string& move_str : line){
-            if(cur.player == 0){
-                b[book_key(cur)] = move_str;
-            }
-            Move move = str_to_move(move_str);
-            State* next = cur.next_state(move);
-            next->get_legal_actions();
-            cur = *next;
-            delete next;
-        }
-        return b;
-    }();
-    return book;
-}
-
-static bool find_book_move(State& state, Move& out_move){
-    if(state.player != 0){
-        return false;
-    }
-    auto it = white_book().find(book_key(state));
-    if(it == white_book().end()){
-        return false;
-    }
-    Move candidate = str_to_move(it->second);
-    for(const auto& legal : state.legal_actions){
-        if(legal == candidate){
-            out_move = candidate;
-            return true;
-        }
-    }
-    return false;
-}
-
-
 /* === Position Handling === */
 
 void set_position(
@@ -402,17 +299,6 @@ static void do_search(
     if(state.game_state == WIN){
         if(alive()){
             send("bestmove " + move_to_str(state.legal_actions[0]));
-            g_bestmove_sent = true;
-        }
-        g_searching = false;
-        return;
-    }
-
-    Move book_move;
-    if(find_book_move(state, book_move)){
-        if(alive()){
-            g_best_move = book_move;
-            send("bestmove " + move_to_str(book_move));
             g_bestmove_sent = true;
         }
         g_searching = false;

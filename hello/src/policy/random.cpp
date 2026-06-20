@@ -1,5 +1,5 @@
 #include <cstdlib>
-#include "111061143_state.hpp"
+#include "state.hpp"
 #include "random.hpp"
 
 
